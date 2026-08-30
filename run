@@ -1,0 +1,35 @@
+#!/bin/sh
+# shellcheck disable=SC2317
+set -eu
+
+app_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+: "${GAR_SERVOCTL_BIN:=$app_dir/gar-servoctl}"
+: "${GAR_I2C_CONFIG:=$app_dir/hardware/i2c.csv}"
+: "${GAR_SERVO_CONFIG:=$app_dir/hardware/servo-calibration.csv}"
+
+export GAR_I2C_CONFIG GAR_SERVO_CONFIG
+
+# Physical Target lifecycle adapters invoke run without arguments. Validate
+# the Product configuration and stay alive without opening I2C or energizing
+# any servo. Explicit arguments retain the one-command CLI behavior.
+if [ "$#" -eq 0 ]; then
+    "$GAR_SERVOCTL_BIN" validate
+    service_stop=0
+    service_child=""
+    stop_service() {
+        service_stop=1
+        if [ -n "$service_child" ]; then
+            kill "$service_child" 2>/dev/null || true
+        fi
+    }
+    trap stop_service HUP INT TERM
+    while [ "$service_stop" -eq 0 ]; do
+        sleep 3600 &
+        service_child=$!
+        wait "$service_child" || true
+        service_child=""
+    done
+    exit 0
+fi
+
+exec "$GAR_SERVOCTL_BIN" "$@"

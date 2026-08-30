@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "id": "gar-servo-pet",
+  "build": {
+    "system": "make",
+    "goal": "target-build",
+    "binary": "build/target/gar-servoctl",
+    "artifact_name": "gar-servoctl"
+  },
+  "runtime": {
+    "entrypoint": "run",
+    "readme": "README.md",
+    "install_dir": "/opt/gar/apps/gar-servo-pet",
+    "configuration": {
+      "i2c": "hardware/i2c.csv",
+      "connections": "hardware/connections.csv",
+      "servo_calibration": "hardware/servo-calibration.csv"
+    }
+  }
+}
