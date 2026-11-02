@@ -115,6 +115,8 @@ static void usage(FILE *stream)
         "  gar-servoctl [CONFIG] air-walk --amplitude N --cycles N "
         "--step-ms N --pause-ms N --ack-all --ack-neutral-known "
         "--body-lifted\n"
+        "  gar-servoctl [CONFIG] sequence --positions N,N,... "
+        "--step-ms N --hold-ms N --ack-all --ack-position-known\n"
         "\n"
         "CONFIG:\n"
         "  --i2c-config PATH       i2c.csv (or GAR_I2C_CONFIG)\n"
@@ -953,6 +955,93 @@ static int command_air_walk(const struct cli_context *context, int argc,
     return result == 0 ? 0 : 1;
 }
 
+/* Frame-major positions follow servo-calibration.csv order. The caller must
+ * explicitly know the physical first frame; no position is inferred from a
+ * previous command because FULL_OFF removes holding torque. */
+static int command_sequence(const struct cli_context *context, int argc,
+                            char **argv)
+{
+    struct gar_i2c_config i2c;
+    struct gar_servo_config servos;
+    struct pca9685_linux linux_io;
+    struct pca9685 controller;
+    struct gar_motion_runtime runtime;
+    int32_t positions[GAR_MAX_SEQUENCE_FRAMES * GAR_MAX_SERVOS];
+    const char *text = NULL;
+    uint32_t step_ms = 0U, hold_ms = UINT32_MAX;
+    bool ack_all = false, ack_position = false;
+    size_t count = 0U;
+    int index, result;
+    char error[512];
+
+    for (index = 0; index < argc; ++index) {
+        if (strcmp(argv[index], "--ack-all") == 0) {
+            ack_all = true;
+        } else if (strcmp(argv[index], "--ack-position-known") == 0) {
+            ack_position = true;
+        } else if (index + 1 < argc && strcmp(argv[index], "--positions") == 0 && text == NULL) {
+            text = argv[++index];
+        } else if (index + 1 < argc && strcmp(argv[index], "--step-ms") == 0) {
+            if (parse_u32(argv[++index], 1U, GAR_MAX_SEQUENCE_STEP_MS, &step_ms) != 0) {
+                (void)fprintf(stderr, "error: invalid sequence step\n");
+                return 2;
+            }
+        } else if (index + 1 < argc && strcmp(argv[index], "--hold-ms") == 0) {
+            if (parse_u32(argv[++index], 0U, GAR_MAX_SEQUENCE_HOLD_MS, &hold_ms) != 0) {
+                (void)fprintf(stderr, "error: invalid sequence hold\n");
+                return 2;
+            }
+        } else {
+            (void)fprintf(stderr, "error: invalid sequence argument '%s'\n", argv[index]);
+            return 2;
+        }
+    }
+    if (text == NULL || *text == '\0' || step_ms == 0U || hold_ms == UINT32_MAX || !ack_all || !ack_position) {
+        (void)fprintf(stderr, "error: sequence requires --positions, --step-ms, --hold-ms, --ack-all and --ack-position-known\n");
+        return 2;
+    }
+    while (*text != '\0') {
+        char *end;
+        long value;
+        if (count >= GAR_MAX_SEQUENCE_FRAMES * GAR_MAX_SERVOS ||
+            !((*text >= '0' && *text <= '9') || (*text == '-' && text[1] >= '0' && text[1] <= '9'))) {
+            (void)fprintf(stderr, "error: invalid sequence positions\n");
+            return 2;
+        }
+        errno = 0;
+        value = strtol(text, &end, 10);
+        if (errno != 0 || value < -1000 || value > 1000 ||
+            (*end != '\0' && *end != ',') || (*end == ',' && end[1] == '\0')) {
+            (void)fprintf(stderr, "error: invalid sequence positions\n");
+            return 2;
+        }
+        positions[count++] = (int32_t)value;
+        text = *end == ',' ? end + 1 : end;
+    }
+    if (load_all(context, &i2c, &servos) != 0) {
+        return 1;
+    }
+    if (count % servos.count != 0U || count / servos.count < 2U ||
+        count / servos.count > GAR_MAX_SEQUENCE_FRAMES) {
+        (void)fprintf(stderr, "error: sequence needs 2..%u complete frames in calibration CSV order\n", GAR_MAX_SEQUENCE_FRAMES);
+        return 2;
+    }
+    if (prepare_motion_controller(&i2c, &linux_io, &controller) != 0) {
+        return 1;
+    }
+    runtime = motion_runtime();
+    result = gar_motion_sequence(&controller, servos.servos, servos.count,
+                                 positions, count / servos.count, step_ms,
+                                 hold_ms, &runtime, error, sizeof(error));
+    if (result != 0) {
+        (void)fprintf(stderr, "error: %s\n", error);
+    } else {
+        (void)printf("sequence complete; outputs off\n");
+    }
+    pca9685_linux_close(&linux_io);
+    return result == 0 ? 0 : 1;
+}
+
 int main(int argc, char **argv)
 {
     struct cli_context context;
@@ -1019,6 +1108,9 @@ int main(int argc, char **argv)
     }
     if (strcmp(command, "air-walk") == 0) {
         return command_air_walk(&context, argc - index, &argv[index]);
+    }
+    if (strcmp(command, "sequence") == 0) {
+        return command_sequence(&context, argc - index, &argv[index]);
     }
     (void)fprintf(stderr, "error: unknown command '%s'\n", command);
     usage(stderr);

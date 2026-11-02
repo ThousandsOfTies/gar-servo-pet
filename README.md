@@ -115,7 +115,18 @@ move SERVO --from-position -1000..1000 --position -1000..1000 \
   --duration-ms N --hold-ms N --ack-position-known
 air-walk --amplitude 1..250 --cycles 1..5 --step-ms 250..2000 \
   --pause-ms 0..500 --ack-all --ack-neutral-known --body-lifted
+sequence --positions N,N,... --step-ms 1..5000 --hold-ms 0..1000 \
+  --ack-all --ack-position-known
 ```
+
+`sequence` exposes the existing bounded multi-servo ramp engine to application
+planners. Positions are frame-major, in `servo-calibration.csv` row order, not
+channel or role order. Supply 2..12 complete frames, each with one normalized
+-1000..1000 integer per configured servo. Calibration, per-servo slew rates,
+the 30-second sequence deadline, locking, cancellation and final FULL_OFF all
+remain enforced. The caller must know the physical first pose and explicitly
+acknowledge it; this API does not infer an angle from a previous powered-off
+command. Gait/posture keyframes belong to the Product, not the controller.
 
 Recommended commissioning order:
 

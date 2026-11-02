@@ -125,4 +125,27 @@ case "$output" in
         ;;
 esac
 
+run_rejected sequence --positions 0,0,100,100 --step-ms 600 --hold-ms 0 --ack-all
+[ "$status" -eq 2 ]
+case "$output" in
+    *"requires"*"--ack-position-known"*) ;;
+    *) echo "FAIL: sequence accepted an unknown starting pose" >&2; exit 1 ;;
+esac
+
+for positions in '0,' '0,,1' '0,1001' '0,-1001' '0,nan' '0, 1' '0,+1'; do
+    run_rejected sequence --positions "$positions" --step-ms 600 --hold-ms 0 --ack-all --ack-position-known
+    [ "$status" -eq 2 ]
+    case "$output" in
+        *"invalid sequence positions"*) ;;
+        *) echo "FAIL: invalid sequence reached config/I2C: $positions" >&2; exit 1 ;;
+    esac
+done
+
+run_rejected sequence --positions 0,0,-100,100 --step-ms 600 --hold-ms 0 --ack-all --ack-position-known
+[ "$status" -eq 1 ]
+case "$output" in
+    *"configuration path missing"*) ;;
+    *) echo "FAIL: valid sequence did not reach configuration loading" >&2; exit 1 ;;
+esac
+
 echo "test_cli: OK"

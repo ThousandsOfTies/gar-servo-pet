@@ -327,6 +327,31 @@ static int test_motion_sequence(void)
               "sequence rate rejection happens before I2C") != 0) {
         return -1;
     }
+    (void)memset(&fake, 0, sizeof(fake));
+    active_fake = &fake;
+    runtime = runtime_for(&fake);
+    fake.stop_after_ms = 80U;
+    if (check(gar_motion_sequence(&controller, calibrations, 2U, positions,
+                                  3U, 500U, 20U, &runtime, error,
+                                  sizeof(error)) != 0,
+              "stop interrupts an active multi-servo sequence") != 0 ||
+        check(fake.slept_ms == 80U && fake.off_count == 1U,
+              "interrupted sequence disables outputs without finishing gait") != 0) {
+        return -1;
+    }
+
+    (void)memset(&fake, 0, sizeof(fake));
+    active_fake = &fake;
+    runtime = runtime_for(&fake);
+    calibrations[1].calibrated = false;
+    if (check(gar_motion_sequence(&controller, calibrations, 2U, positions,
+                                  3U, 500U, 20U, &runtime, error,
+                                  sizeof(error)) != 0,
+              "uncalibrated leg rejects the entire sequence") != 0 ||
+        check(fake.initialize_count == 0U && fake.pulse_count == 0U,
+              "calibration rejection happens before writes") != 0) {
+        return -1;
+    }
     return 0;
 }
 
